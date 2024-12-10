@@ -24,18 +24,23 @@ import (
 )
 
 var cfg = struct {
-	AIProvider     string
-	AISecretPath   string
-	AISecretEnvVar string
-	Color          bool
-	Debug          bool
-	Write          bool
+	AIProvider   string
+	AISecretPath string
+	Color        bool
+	Debug        bool
+	Write        bool
 }{}
+
+const (
+	providerOpenAI    = "openai"
+	providerAnthropic = "anthropic"
+)
 
 // colorizer
 var au *aurora.Aurora
 
 type AIClient interface {
+	Name() string
 	GetSuggestions(ctx context.Context, systemPrompt, usrPrompt string) ([]Suggestion, error)
 	CreateTest(ctx context.Context, systemPrompt, usrPrompt string) (string, error)
 }
@@ -60,9 +65,8 @@ func init() {
 		flag.PrintDefaults()
 	}
 
-	flag.String("ai_provider", "openai", "AI Provider")
-	flag.String("ai_secret_path", "./secrets/openai_api_key", "AI Secret Path")
-	flag.String("ai_secret_env_var", "OPENAI_API_KEY", "AI Secret Environment Variable")
+	flag.String("provider", "openai", "AI Provider")
+	flag.String("secret_path", "./secrets/anthropic_api_key", "AI Secret Path")
 	flag.Bool("color", true, "Toggle color")
 	flag.Bool("debug", false, "Toggle debug")
 	flag.Bool("write", false, "Toggle write file")
@@ -71,9 +75,8 @@ func init() {
 	pflag.Parse()
 	viper.BindPFlags(pflag.CommandLine)
 
-	cfg.AIProvider = viper.GetString("ai_provider")
-	cfg.AISecretPath = viper.GetString("ai_secret_path")
-	cfg.AISecretEnvVar = viper.GetString("ai_secret_env_var")
+	cfg.AIProvider = viper.GetString("provider")
+	cfg.AISecretPath = viper.GetString("secret_path")
 	cfg.Color = viper.GetBool("color")
 	cfg.Debug = viper.GetBool("debug")
 	cfg.Write = viper.GetBool("write")
@@ -83,13 +86,15 @@ func init() {
 	var aiKey string
 
 	// Recommended: check file
-	if key, err := os.ReadFile(cfg.AISecretPath); err != nil {
+	if key, err := os.ReadFile(cfg.AISecretPath); err == nil {
 		aiKey = string(key)
 	}
 
 	// Optional: check environment variable
-	if key, exists := os.LookupEnv(cfg.AISecretEnvVar); exists {
-		aiKey = key
+	if aiKey == "" {
+		if key, exists := os.LookupEnv("AI_API_KEY"); exists {
+			aiKey = key
+		}
 	}
 
 	// Required: exit if no API key is found
@@ -97,10 +102,10 @@ func init() {
 		log.Fatalf("api key is required")
 	}
 
-	if cfg.AIProvider == "openai" {
-		aiClient = NewOpenAIClient(aiKey)
-	} else if cfg.AIProvider == "anthropic" {
-		aiClient = NewAnthropicClient(aiKey)
+	if cfg.AIProvider == providerOpenAI {
+		aiClient = NewOpenAIClient(strings.Trim(aiKey, "\n"))
+	} else if cfg.AIProvider == providerAnthropic {
+		aiClient = NewAnthropicClient(strings.Trim(aiKey, "\n"))
 	} else {
 		log.Fatalf("invalid provider: %s", cfg.AIProvider)
 	}
@@ -182,10 +187,27 @@ func main() {
 
 	if cfg.Write {
 		out := fmt.Sprintf("%s/%s_test.go", filepath.Dir(path), "unit")
-		err := os.WriteFile(out, []byte(unitTest), 0644)
+		// create dir
+		if _, err := os.Stat(out); os.IsNotExist(err) {
+			err := os.WriteFile(out, []byte(unitTest), 0644)
+			if err != nil {
+				logger.Error(fmt.Sprintf("Failed to write file: %v", err))
+				fmt.Println(unitTest)
+				return
+			}
+		}
+
+		// Open the file in append mode, create if it doesn't exist
+		file, err := os.OpenFile(out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			logger.Error(fmt.Sprintf("Failed to write file: %v", err))
-			fmt.Println(unitTest)
+			fmt.Printf("Failed to open file: %v\n", err)
+			return
+		}
+		defer file.Close()
+
+		// Write the content to the file
+		if _, err := file.WriteString(unitTest); err != nil {
+			fmt.Printf("Failed to write to file: %v\n", err)
 			return
 		}
 
@@ -256,11 +278,11 @@ func getSuggestedUnitTests(ctx context.Context, content []byte) ([]Suggestion, e
 	var suggestions = []Suggestion{}
 
 	sysPrompt := "You are a seasoned engineer that generates unit test suggestions for the provided code."
-	usrPrompt := fmt.Sprintf("Analyze the following Go code and list possible unit tests that could be generated:\n\n%s", content)
+	usrPrompt := fmt.Sprintf("Analyze the following code and list possible unit tests that should be generated for great coverage. Do not explain. Document all functions clearly. \n\n### Code\n\n%s", content)
 
 	suggestions, err := aiClient.GetSuggestions(ctx, sysPrompt, usrPrompt)
 	if err != nil {
-		return suggestions, fmt.Errorf("failed to call OpenAI API: %w", err)
+		return suggestions, fmt.Errorf("failed to call AI: %w", err)
 	}
 
 	return suggestions, nil

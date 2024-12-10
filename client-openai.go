@@ -19,6 +19,10 @@ func NewOpenAIClient(key string) AIClient {
 	}
 }
 
+func (c *OpenAIClient) Name() string {
+	return providerOpenAI
+}
+
 // GetSuggestions returns suggestions
 func (c *OpenAIClient) GetSuggestions(ctx context.Context, systemPrompt, usrPrompt string) ([]Suggestion, error) {
 	var result Result
