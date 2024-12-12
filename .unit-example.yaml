@@ -1,0 +1,6 @@
+# rename to .unit.yaml or ~/.unit.yaml
+debug: false # default
+color: true # default
+write: false # default
+provider: anthropic
+secret_path: $HOME/.secrets/anthropic_api_key

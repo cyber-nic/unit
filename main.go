@@ -59,14 +59,36 @@ type Result struct {
 }
 
 func init() {
+	viper.SetConfigName(".unit")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("$HOME")
+	viper.AddConfigPath(".")
+	// optionally read config
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			// disappointing: vipe not failing if invalid file content eg. json in .yaml
+			panic(fmt.Errorf("fatal error config file: %s \n", err))
+		}
+	}
+
 	// handle config flags
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] path\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
-	flag.String("provider", "openai", "AI Provider")
-	flag.String("secret_path", "./secrets/anthropic_api_key", "AI Secret Path")
+	provider := "anthropic"
+	if viper.IsSet("provider") {
+		provider = viper.GetString("provider")
+	}
+	flag.String("provider", provider, "AI Provider")
+
+	secretPath := ".provider_api_key"
+	if viper.IsSet("secret_path") {
+		secretPath = viper.GetString("secret_path")
+	}
+
+	flag.String("secret_path", secretPath, "AI Secret Path")
 	flag.Bool("color", true, "Toggle color")
 	flag.Bool("debug", false, "Toggle debug")
 	flag.Bool("write", false, "Toggle write file")
